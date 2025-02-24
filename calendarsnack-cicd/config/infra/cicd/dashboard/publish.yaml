@@ -1,0 +1,9 @@
+template:
+  path: cicd/publish-sam-app.j2
+parameters:
+  GitHubAccount: {GitHubAccount}
+  GitHubRepo: calendarsnack-dashboard
+  GitHubCodeStarConnectionArn: !stack_output infra/cicd/codestar-connection.yaml::CodeStarConnectionArn
+  S3BucketArn: !stack_output infra/cicd/sam-apps-bucket.yaml::BucketArn
+sceptre_user_data:
+  SamApps: !file data/sam-apps/dashboard.yaml

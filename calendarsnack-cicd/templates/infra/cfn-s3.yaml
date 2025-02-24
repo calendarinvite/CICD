@@ -1,0 +1,59 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: Bootstrap a bucket for CloudFormation use.
+
+Parameters:
+  BucketName:
+    Type: String
+    Description: Name of S3 Bucket
+    Default: ""
+
+  Versioning:
+    Type: String
+    Description: Indicates whether versioning should be enabled or not.
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+
+
+Conditions:
+  BucketNameReferenceStack: !Equals
+    - !Ref BucketName
+    - ""
+
+  VersioningEnabled: !Equals
+    - !Ref Versioning
+    - "true"
+
+Resources:
+  # Objects in this bucket are disposable and only used for CFN deploy
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !If
+        - BucketNameReferenceStack
+        - !Sub "${AWS::StackName}"
+        - !Ref BucketName
+      VersioningConfiguration: !If
+        - VersioningEnabled
+        - Status: Enabled
+        - !Ref AWS::NoValue
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: True
+        BlockPublicPolicy: True
+        IgnorePublicAcls: True
+        RestrictPublicBuckets: True
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Status: Enabled
+            ExpirationInDays: 182
+
+Outputs:
+  BucketName:
+    Description: Name of the infrastructure S3 Bucket for CloudFormation deployments
+    Value: !Ref S3Bucket

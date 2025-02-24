@@ -1,0 +1,10 @@
+template:
+  path: cicd/sceptre-launch.yaml
+parameters:
+  GitHubAccount: {GitHubAccount}
+  GitHubRepo: calendarsnack-cicd
+  GitHubCodeStarConnectionArn: !stack_output infra/cicd/codestar-connection.yaml::CodeStarConnectionArn
+  BuildSpecFilePath: .aws/buildspecs/sceptre-launch.yaml
+  AppSharingLambdaArn: !stack_output infra/cicd/share-apps-lambda.yaml::AppSharingLambdaArn
+  # DevSceptreRoleArn: !stack_output infra/dev-sceptre-role.yaml::SceptreRoleArn
+  # StageSceptreRoleArn: !stack_output infra/stage-sceptre-role.yaml::SceptreRoleArn

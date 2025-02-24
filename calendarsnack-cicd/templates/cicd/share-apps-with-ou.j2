@@ -1,0 +1,95 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: >
+  Creates a Lambda App that enables sharing of SAM apps with
+  accounts in OrgUnits.
+
+Parameters:
+  OrgUnits:
+    Description: >
+      OrgUnit Aliases to grant application deployment permissions.
+      Provide a comma delimited string with no spaces.
+    Type: String
+
+  FilterLabel:
+    Description: Filter SAM apps by label.
+    Type: String
+    Default: calendarsnack
+
+
+Resources:
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${ApplicationSharingLambda}
+      RetentionInDays: 7
+
+  ApplicationSharingRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: Organization
+                Effect: Allow
+                Action:
+                - organizations:ListAccountsForParent
+                - organizations:ListOrganizationalUnitsForParent
+                Resource:
+                - arn:aws:organizations::*:ou/o-*/ou-*
+                - arn:aws:organizations::*:root/o-*/r-6f2y
+              - Sid: SamApps
+                Effect: Allow
+                Action:
+                - serverlessrepo:PutApplicationPolicy
+                Resource:
+                - !Sub arn:aws:serverlessrepo:*:${AWS::AccountId}:applications/*
+              - Sid: RootLevel
+                Effect: Allow
+                Action:
+                - serverlessrepo:ListApplications
+                - organizations:ListRoots
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                Resource: "*"
+              - Sid: Logging
+                Effect: Allow
+                Action:
+                  - logs:PutLogEvents
+                Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*:*
+
+  ApplicationSharingLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Description: >
+        Share applications (based on label) with Accounts in
+        OrganizationUnits (based on alias).
+      Environment:
+        Variables:
+          OrgUnits: !Ref OrgUnits
+          FilterLabel: !Ref FilterLabel
+      FunctionName: share-application-with-ous
+      Role: !GetAtt ApplicationSharingRole.Arn
+      Runtime: python3.9
+      Handler: index.lambda_handler
+      Timeout: 30
+      Code:
+        ZipFile: |
+          {{ sceptre_user_data.Code | indent(10) }}
+
+
+Outputs:
+  AppSharingLambdaArn:
+    Value: !GetAtt ApplicationSharingLambda.Arn

@@ -1,0 +1,178 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: Creates a CodeBuild job and KMS key.
+
+Parameters:
+  AppSharingLambdaArn:
+    Type: String
+    Description: Arn of Lambda used to trigger App Sharing with OUs.
+
+  BuildSpecFilePath:
+    Description: Filepath to local buildspec file.
+    Type: String
+
+  # DevSceptreRoleArn:
+  #   Description: Sceptre Role Arn for dev account
+  #   Type: String
+
+  GitHubAccount:
+    Description: GitHub account containing the repo to mirror.
+    Type: String
+
+  GitHubCodeStarConnectionArn:
+    Description: AWS CodeStar Connection to use to connect to GitHub.
+    Type: String
+
+  GitHubRepo:
+    Description: GitHub repo to mirror.
+    Type: String
+
+  # StageSceptreRoleArn:
+  #   Description: Sceptre Role Arn for stage account
+  #   Type: String
+
+  ############
+  # Optional #
+  ############
+  ComputeType:
+    Description: Compute type instance to run CodeBuild on.
+    Type: String
+    Default: BUILD_LAMBDA_1GB #noqa
+    #   - BUILD_LAMBDA_1GB
+    #   - BUILD_GENERAL1_SMALL
+    #   - BUILD_GENERAL1_MEDIUM
+    #   - BUILD_GENERAL1_LARGE
+
+Resources:
+  ##############
+  # CodeBuild  #
+  ##############
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/codebuild/${CodeBuildProject}
+      RetentionInDays: 7
+
+  CodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Ref AWS::StackName
+      Description: Deploys sceptre-launch
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+      ConcurrentBuildLimit: 1
+      Artifacts:
+        Type: NO_ARTIFACTS
+      Environment:
+        ComputeType: !Ref ComputeType
+        Type: LINUX_LAMBDA_CONTAINER #noqa
+        Image: aws/codebuild/amazonlinux-x86_64-lambda-standard:python3.11
+        # EnvironmentVariables:
+        # - Name: DevSceptreRole
+        #   Type: PLAINTEXT
+        #   Value: !Ref DevSceptreRoleArn
+        # - Name: StageSceptreRole
+        #   Type: PLAINTEXT
+        #   Value: !Ref StageSceptreRoleArn
+      Source:
+        Type: GITHUB
+        Location: !Sub "https://github.com/${GitHubAccount}/${GitHubRepo}.git"
+        BuildSpec: !Ref BuildSpecFilePath
+        GitCloneDepth: 0
+        Auth:
+          Type: OAUTH
+      Triggers:
+        Webhook: true
+        FilterGroups:
+          - - Type: EVENT
+              Pattern: PUSH
+            - Type: HEAD_REF
+              Pattern: 'refs/heads/main'
+
+  CodeBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          Effect: Allow
+          Principal:
+            Service: codebuild.amazonaws.com
+          Action: sts:AssumeRole
+      Policies:
+        - PolicyName: DefaultCodeBuild
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                Resource: "*"
+              - Sid: Logging
+                Effect: Allow
+                Action:
+                  - logs:PutLogEvents
+                Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*:*
+              - Effect: Allow
+                Action:
+                  - codestar-connections:UseConnection
+                Resource: !Ref GitHubCodeStarConnectionArn
+              - Effect: Allow
+                Action:
+                  - cloudformation:*
+                Resource: "*"
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !Ref AppSharingLambdaArn
+              - Effect: Allow
+                Action: sts:AssumeRole
+                Resource: arn:aws:iam::*:role/calendarsnack-infra-*-sceptre-*
+
+  #######
+  # KMS #
+  #######
+
+  KmsKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: alias/sceptre-launch
+      TargetKeyId: !GetAtt KmsKey.Arn
+
+  KmsKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: Key for CodeBuild resources.
+      KeyPolicy:
+        Version: '2012-10-17'
+        Id: CodeBuildKeyPolicy
+        Statement:
+          - Sid: Enable IAM User Permissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action: kms:*
+            Resource: '*'
+          - Sid: Allow use of the key
+            Effect: Allow
+            Principal:
+              AWS: !GetAtt CodeBuildRole.Arn
+            Action:
+              - kms:DescribeKey
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey
+              - kms:GenerateDataKeyWithoutPlaintext
+            Resource: '*'
+          - Sid: Allow use of decryption key to CodeBuild
+            Effect: Allow
+            Principal:
+              Service: "codebuild.amazonaws.com"
+            Action:
+              - kms:Decrypt
+            Resource: "*"
+
+Outputs:
+  CodeBuildArn:
+    Description: ARN of this CodeBuild Project.
+    Value: !GetAtt CodeBuildProject.Arn

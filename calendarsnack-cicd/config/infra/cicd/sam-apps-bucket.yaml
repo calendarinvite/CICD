@@ -1,0 +1,2 @@
+template:
+  path: cicd/sam-app-bucket.yaml

@@ -1,0 +1,151 @@
+aliases:
+- &aws_get_item_arn 'arn:aws:apigateway:${AWS::Region}:dynamodb:action/GetItem'
+
+Stages:
+- Stage: Event
+  Apps:
+    - Name: get-event-summary
+      ApiKeyRequired: true
+      AuthorizationType: NONE
+      FunctionName: get-event-summary
+      FunctionUri: *aws_get_item_arn
+      HttpMethod: GET
+      IntegrationHttpMethod: POST
+      IntegrationType: AWS
+      PassThroughBehavior: NEVER
+      PathPart: '''{uid}'''
+      RoleName: DynamoDbGetItemApiRole
+      Mock: true
+    - Name: get-new-event-invite-from-api
+      ApiKeyRequired: false
+      AuthorizationType: NONE
+      FunctionName: get-new-event-invite-from-api
+      HttpMethod: GET
+      IntegrationHttpMethod: POST
+      IntegrationType: AWS_PROXY
+      Parent: get-event-summary
+      PassThroughBehavior: NEVER
+      PathPart: invite
+      Mock: true
+    - Name: get-event-report
+      ApiKeyRequired: true
+      AuthorizationType: NONE
+      FunctionName: get-event-attendee-report
+      HttpMethod: GET
+      IntegrationHttpMethod: POST
+      IntegrationType: AWS_PROXY
+      Parent: get-event-summary
+      PassThroughBehavior: NEVER
+      PathPart: report
+      Mock: true
+    - Name: get-event-statistics
+      ApiKeyRequired: true
+      AuthorizationType: NONE
+      FunctionName: get-event-statistics
+      FunctionUri: *aws_get_item_arn
+      HttpMethod: GET
+      IntegrationHttpMethod: POST
+      IntegrationType: AWS
+      Parent: get-event-summary
+      PassThroughBehavior: NEVER
+      PathPart: statistics
+      RoleName: DynamoDbGetItemApiRole
+      Mock: true
+    - Name: get-event-attendee-sanitized-report
+      ApiKeyRequired: true
+      AuthorizationType: NONE
+      FunctionName: get-event-attendee-sanitized-list
+      HttpMethod: GET
+      IntegrationHttpMethod: POST
+      IntegrationType: AWS_PROXY
+      Parent: get-event-summary
+      PassThroughBehavior: NEVER
+      PathPart: attendees
+      Mock: true
+
+- Stage: Organizer
+  Apps:
+  - Name: organizer
+    PathPart: '''{organizer}'''
+  - Name: organizer-events
+    ApiKeyRequired: true
+    AuthorizationType: NONE
+    FunctionName: get-organizer-events-legacy
+    HttpMethod: GET
+    IntegrationHttpMethod: POST
+    IntegrationType: AWS_PROXY
+    PassThroughBehavior: WHEN_NO_MATCH
+    PathPart: events
+    Parent: organizer
+    Mock: true
+
+  - Name: shadow
+    PathPart: shadow
+
+  - Name: shadow-organizer
+    PathPart: '''{organizer}'''
+    Parent: shadow
+  - Name: shadow-get-organizer-events-legacy
+    ApiKeyRequired: true
+    AuthorizationType: NONE
+    FunctionName: get-organizer-events-legacy
+    HttpMethod: GET
+    IntegrationHttpMethod: POST
+    IntegrationType: AWS_PROXY
+    Parent: shadow-organizer
+    PassThroughBehavior: NEVER
+    PathPart: events
+    Mock: true
+
+  - Name: shadow-get-organizer-statistics
+    ApiKeyRequired: true
+    AuthorizationType: NONE
+    FunctionName: get-organizer-statistics-shadow
+    FunctionUri: *aws_get_item_arn
+    HttpMethod: GET
+    IntegrationHttpMethod: POST
+    IntegrationType: AWS
+    Parent: shadow-organizer
+    PassThroughBehavior: NEVER
+    PathPart: statistics
+    RoleName: DynamoDbGetItemApiRole
+    Mock: true
+
+- Stage: System
+  Apps:
+  - Name: events
+    ApiKeyRequired: true
+    AuthorizationType: NONE
+    FunctionName: get-system-events
+    HttpMethod: GET
+    IntegrationHttpMethod: POST
+    IntegrationType: AWS_PROXY
+    PassThroughBehavior: NEVER
+    PathPart: events
+    PermissionPath: "*/GET/*"
+    Mock: true
+
+  - Name: system-statistics
+    ApiKeyRequired: true
+    AuthorizationType: NONE
+    FunctionName: get-system-statistics
+    FunctionUri: *aws_get_item_arn
+    HttpMethod: GET
+    IntegrationHttpMethod: POST
+    IntegrationType: AWS
+    PassThroughBehavior: NEVER
+    PathPart: statistics
+    RoleName: DynamoDbGetItemApiRole
+    Mock: true
+
+- Stage: Order
+  Apps:
+  - Name: process-shopify-order
+    ApiKeyRequired: false
+    AuthorizationType: NONE
+    FunctionName: process-shopify-order
+    HttpMethod: POST
+    IntegrationHttpMethod: POST
+    IntegrationType: AWS_PROXY
+    PassThroughBehavior: NEVER
+    PathPart: order

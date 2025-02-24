@@ -1,0 +1,804 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform:
+- AWS::Serverless-2016-10-31
+
+Description: Deploys everything needed for a calendarsnack implementation.
+
+Parameters:
+  ############
+  # Required #
+  ############
+  CodeCommitRepoName:
+    Type: String
+    Description: Name of CodeCommit repo where templates are stored.
+
+  DashboardDefaultSemanticVersion:
+    Type: String
+    Description: Default SemanticVersion for dashboard apps.
+
+  DefaultLambdaLogLevel:
+    Type: String
+    Description: Default log level for Lambdas.
+    Default: WARNING
+    AllowedValues:
+    - ERROR
+    - WARNING
+    - INFO
+    - DEBUG
+
+  DomainName:
+    Type: String
+    Description: Domain name to be used for solution.
+
+  DynamoDbTableName:
+    Type: String
+    Description: Name of DynamoDB Table to be used for solution.
+
+  Environment:
+    Type: String
+    Description: Environment that solution is being launched in (prod, stage, or dev).
+
+  EventManagementDefaultSemanticVersion:
+    Type: String
+    Description: Default SemanticVersion for event management apps.
+
+  PackagedSolutionS3:
+    Type: String
+    Description: Bucket name for pipeline templates.
+
+  Project:
+    Type: String
+    Description: Name of project to differentiate resources.
+
+  ImportedSesS3Bucket:
+    Type: String
+    Description: >
+      Do not create a new S3 Bucket to receive SES
+      if one is already configured.
+    Default: false
+
+  SesS3BucketName:
+    Type: String
+    Description: Name of S3 Bucket to receive SES.
+
+  SesEmailIdentityName:
+    Type: String
+    Description: Name to use for SesEmailIdentity.
+
+  SesBulkEmailIdentityName:
+    Type: String
+    Description: Name to use for SesEmailIdentity.
+
+  ############
+  # Optional #
+  ############
+  ApiGatewayDomainExists:
+    Type: String
+    Description: >
+      Do not create a new ApiGateway Domain if one is already configured.
+    Default: false
+    AllowedValues:
+    - true
+    - false
+
+  ApiGatewayDomainSecurityPolicy:
+    Type: String
+    Description: SecurityPolicy to use for API Custom Domain.
+    Default: TLS_1_2
+
+  ImportedApiKeyId:
+    Type: String
+    Description: API Key ID if an API Key already.
+    Default: ""
+
+  ApiKeyEnabled:
+    Type: String
+    Description: Enable/Disable API Key.
+    Default: true
+    AllowedValues:
+    - true
+    - false
+
+  BurstLimit:
+    Type: String
+    Description: >
+      The API target request burst rate limit. This allows more requests
+      through for a period of time than the target rate limit.
+    Default: 200
+
+  DynamoDbTableExists:
+    Type: String
+    Description: >
+      Do not create a new DynamoDb if one is already configured.
+    Default: false
+    AllowedValues:
+    - true
+    - false
+
+  HostedZoneId:
+    Type: String
+    Description: Route53 Hosted Zone Id.
+    Default: ""
+
+  AwsHostedZone:
+    Type: String
+    Description: AWS based hosted zone for DNS records.
+    Default: false
+
+  ImportedApiDomainCertificate:
+    Type: String
+    Description: Optionally provide existing ApiDomainCertificate.
+    Default: ""
+
+  ImportedSesEmailIdentity:
+    Type: String
+    Description: >
+      Create SES Email Identity if not imported.
+    Default: true
+
+  RateLimit:
+    Type: String
+    Description: The API target request rate limit.
+    Default: 100
+
+Conditions:
+  CreateApiGatewayDomain: !Equals
+  - !Ref ApiGatewayDomainExists
+  - false
+
+  CreateApiKey: !Equals
+  - !Ref ImportedApiKeyId
+  - ""
+
+  CreateDynamoDbTable: !Equals
+  - !Ref DynamoDbTableExists
+  - false
+
+  CreateRegionalApiDomainCertificate: !Equals
+  - !Ref ImportedApiDomainCertificate
+  - ""
+
+  CreateSesEmailIdentity: !Equals
+  - !Ref ImportedSesEmailIdentity
+  - false
+
+  CreateSesS3Bucket: !Equals
+  - !Ref ImportedSesS3Bucket
+  - false
+
+  CreateRoute53HostedZone: !And
+  - !Equals
+    - !Ref AwsHostedZone
+    - true
+  - !Equals
+    - !Ref HostedZoneId
+    - ""
+
+  CreateSesRoute53RecordSets: !And
+  - !Equals
+    - !Ref AwsHostedZone
+    - true
+  - !Condition CreateSesEmailIdentity
+
+Resources:
+  #####################
+  # SnsToSqsPipelines #
+  #####################
+  {% for app in sceptre_user_data.EventManagementApps %}
+  {% if app.Sns and app.Sqs is defined -%}
+  {{ app.AppName|title|replace("-", "") }}SnsSqs:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://${PackagedSolutionS3}.s3.${AWS::Region}.amazonaws.com/sns-to-sqs.yaml
+      Parameters:
+        TopicName: !Sub ${Project}-${Environment}-{{app.Sns.TopicName}}
+        DisplayName: {{app.Sns.DisplayName}}
+        QueueName: !Sub ${Project}-${Environment}-{{app.Sqs.QueueName}}
+        MaxReceiveCount: {{app.Sqs.MaxReceiveCount}}
+        VisibilityTimeout: {{app.Sqs.Visibility}}
+        {% if app.Sqs.WaitTimeSeconds is defined -%}
+        ReceiveMessageWaitTimeSeconds: {{app.Sqs.WaitTimeSeconds}}
+        {% endif -%}
+  {% endif %}{%  endfor %}
+
+  #############
+  # SES -> S3 #
+  #############
+  S3PublishSnsPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      PolicyDocument:
+        Id: "TopicyPolicy"
+        Version: '2012-10-17'
+        Statement:
+        - Effect: "Allow"
+          Principal:
+            Service: s3.amazonaws.com
+          Action: sns:Publish
+          Resource: "*"
+          Condition:
+            StringEquals:
+              aws:SourceAccount: !Ref AWS::AccountId
+            ArnLike:
+              aws:SourceArn: !Sub arn:aws:s3:::${SesS3BucketName}
+      Topics:
+        {% for app in sceptre_user_data.EventManagementApps -%}
+        {% if app.Sns.FilterPrefix is defined -%}
+        - !GetAtt {{ app.AppName|title|replace("-", "") }}SnsSqs.Outputs.TopicArn
+        {% endif -%}{% endfor %}
+
+  SesS3Bucket: {#TODO: Add LifecyclePolicy#}
+    DependsOn:
+    {% for app in sceptre_user_data.EventManagementApps -%}
+      {% if app.Sns.FilterPrefix is defined -%}
+      - {{ app.AppName|title|replace("-", "") }}SnsSqs
+    {% endif %}{% endfor -%}
+    Condition: CreateSesS3Bucket
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    Properties:
+      BucketName: !Ref SesS3BucketName
+      AccessControl: Private
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+        - BucketKeyEnabled: false
+          ServerSideEncryptionByDefault:
+            SSEAlgorithm: AES256
+      NotificationConfiguration:
+        TopicConfigurations:
+        {% for app in sceptre_user_data.EventManagementApps %}{% if app.Sns.FilterPrefix is defined -%}
+        - Event: "s3:ObjectCreated:*"
+          Topic: !GetAtt {{ app.AppName|title|replace("-", "") }}SnsSqs.Outputs.TopicArn
+          Filter:
+            S3Key:
+              Rules:
+              - Name: Prefix
+                Value: {{app.Sns.FilterPrefix}}
+        {% endif -%}{%- endfor %}
+
+  S3Policy:
+    Type: AWS::S3::BucketPolicy
+    DeletionPolicy: Retain
+    Properties:
+      Bucket: !Ref SesS3BucketName
+      PolicyDocument:
+        Statement:
+        - Principal:
+            Service: ses.amazonaws.com
+          Effect: Allow
+          Action:
+          - s3:PutObject
+          Resource:
+          - !Sub arn:aws:s3:::${SesS3BucketName}/*
+          Condition:
+            StringEquals:
+              aws:SourceAccount: !Ref AWS::AccountId
+
+  SesEmailIdentity:
+    Type: AWS::SES::EmailIdentity
+    Condition: CreateSesEmailIdentity
+    DeletionPolicy: Retain
+    Properties:
+      DkimAttributes:
+        SigningEnabled: true
+      DkimSigningAttributes:
+        NextSigningKeyLength: RSA_1024_BIT
+      EmailIdentity: !Ref SesEmailIdentityName
+      FeedbackAttributes:
+        EmailForwardingEnabled: true
+      MailFromAttributes:
+        BehaviorOnMxFailure: USE_DEFAULT_VALUE
+
+  {% for i in [1, 2, 3] %}
+  SesRecordSetCname{{ i }}:
+    Type: AWS::Route53::RecordSet
+    Condition: CreateSesRoute53RecordSets
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !GetAtt SesEmailIdentity.DkimDNSTokenName{{ i }}
+      ResourceRecords:
+        - !GetAtt SesEmailIdentity.DkimDNSTokenValue{{ i }}
+      Type: CNAME
+      TTL: 60
+  {% endfor %}
+
+  SesRecordSetMxDomain:
+    Type: AWS::Route53::RecordSet
+    Condition: CreateSesRoute53RecordSets
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref DomainName
+      ResourceRecords:
+        - !Sub 0 inbound-smtp.${AWS::Region}.amazonaws.com.
+      Type: MX
+      TTL: 60
+
+  SesRuleSet:
+    Type: AWS::SES::ReceiptRuleSet
+    Properties:
+      RuleSetName: !Sub ${DomainName}-email-receiving
+
+  {% if sceptre_user_data.SesRules is defined %}
+  {% for rule in sceptre_user_data.SesRules %}
+  SesRule{{ rule.Name|title|replace("_", "") }}:
+    DependsOn:
+    - S3Policy
+    Type: AWS::SES::ReceiptRule
+    Properties:
+      Rule:
+        Actions:
+        - S3Action:
+            BucketName: !Ref SesS3BucketName
+            {% if rule.S3Prefix is defined %}
+            ObjectKeyPrefix: {{ rule.S3Prefix }}
+            {%  else %}
+            ObjectKeyPrefix: {{ rule.Name  }}/
+            {%  endif %}
+        Enabled: true
+        Name: {{ rule.Name }}
+        Recipients:
+        {% if rule.CustomRecipient is defined %}
+        - {{ rule.CustomRecipient }}
+        {%  else %}
+        - !Sub {{ rule.Name  }}@${SesEmailIdentityName}
+        {% endif %}
+        # ScanEnabled: !Ref ScanEnabled
+        # TlsPolicy: !Ref TlsPolicy
+      RuleSetName: !Ref SesRuleSet
+
+  SesRecordSetMx{{ rule.Name|title|replace("_", "") }}:
+    Type: AWS::Route53::RecordSet
+    Condition: CreateSesRoute53RecordSets
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Sub {{ rule.Name }}.${DomainName}
+      ResourceRecords:
+        - !Sub 0 inbound-smtp.${AWS::Region}.amazonaws.com.
+      Type: MX
+      TTL: 60
+  {% endfor %}{% endif %}
+
+  ############
+  # DynamoDB #
+  ############
+  DynamoDb:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    Condition: CreateDynamoDbTable
+    Properties:
+      TableName: !Ref DynamoDbTableName
+      BillingMode: PAY_PER_REQUEST
+      KeySchema:
+        - AttributeName: "pk"
+          KeyType: "HASH"
+        - AttributeName: "sk"
+          KeyType: "RANGE"
+      AttributeDefinitions:
+        - AttributeName: "pk"
+          AttributeType: "S"
+        - AttributeName: "sk"
+          AttributeType: "S"
+        - AttributeName: "mailto"
+          AttributeType: "S"
+        - AttributeName: "original_uid"
+          AttributeType: "S"
+        - AttributeName: "tenant"
+          AttributeType: "S"
+        - AttributeName: "last_modified"
+          AttributeType: "N"
+      GlobalSecondaryIndexes:
+        - IndexName: original_uid_lookup
+          KeySchema:
+            - AttributeName: original_uid
+              KeyType: "HASH"
+          Projection:
+            NonKeyAttributes:
+              - pk
+              - sk
+              - uid
+              - mailto
+            ProjectionType: INCLUDE
+        - IndexName: organizer_events
+          KeySchema:
+          - AttributeName: mailto
+            KeyType: "HASH"
+          - AttributeName: last_modified
+            KeyType: "RANGE"
+          Projection:
+            NonKeyAttributes:
+              - pk
+              - sk
+              - mailto
+              - last_modified
+              - description_html
+              - location_html
+              - dtend
+              - status
+              - created
+              - summary_html
+              - dtstart
+              - uid
+              - organizer
+            ProjectionType: INCLUDE
+        - IndexName: system_events
+          KeySchema:
+            - AttributeName: tenant
+              KeyType: "HASH"
+            - AttributeName: last_modified
+              KeyType: "RANGE"
+          Projection:
+            NonKeyAttributes:
+              - pk
+              - sk
+              - mailto
+              - last_modified
+              - description_html
+              - location_html
+              - dtend
+              - status
+              - created
+              - summary_html
+              - dtstart
+              - uid
+              - organizer
+              - tenant
+            ProjectionType: INCLUDE
+
+  SharedLibLambdaLayer:
+    Type: AWS::Serverless::Application
+    Properties:
+      Location:
+        ApplicationId: {{sceptre_user_data.SharedLibAppIdPrefix}}{{sceptre_user_data.LambdaLayers[0].LayerName}}
+        SemanticVersion:  {{sceptre_user_data.LambdaLayers[0].SemanticVersion}}
+
+  DynamoDbGetItemApiRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+              - apigateway.amazonaws.com
+          Action:
+            - sts:AssumeRole
+      Path: "/"
+      Policies:
+        - PolicyName: inline
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: DynamoDbRead
+                Effect: Allow
+                Action:
+                  - "dynamodb:DescribeTable"
+                  - "dynamodb:GetItem"
+                  - "dynamodb:Query"
+                Resource:
+                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DynamoDbTableName}"
+                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DynamoDbTableName}/index/*" #}
+
+  ####################
+  # Event Management #
+  ####################
+  {% for app in sceptre_user_data.EventManagementApps -%}
+  {% if app.SamResources is defined -%}
+  {{ app.AppName|title|replace("-", "") }}SamApp:
+    {% if app.Sns is defined or app.Sqs is defined -%}
+    DependsOn:
+    - {{ app.AppName|title|replace("-", "") }}SnsSqs
+    {% endif -%}
+    Type: AWS::Serverless::Application
+    Properties:
+      Location:
+        ApplicationId: {{ sceptre_user_data.EventManagementAppIdPrefix }}{{ app.AppName }}
+        {% if app.SamResources.SemanticVersion is defined -%}
+        SemanticVersion: {{ app.SamResources.SemanticVersion }}
+        {%- else -%}
+        SemanticVersion: !Ref EventManagementDefaultSemanticVersion
+        {%- endif -%}
+      {%- if app.SamResources.Parameters is defined %}
+      Parameters:
+        LogLevel: !Ref DefaultLambdaLogLevel
+        {% if app.SamResources.Parameters.StaticParams is defined -%}
+        {% for parameter in app.SamResources.Parameters.StaticParams -%}
+        {{ parameter.Key }}: "{{ parameter.Value }}"
+        {% endfor -%}{%- endif %}
+        {% if app.SamResources.Parameters.RefParams is defined -%}
+        {% for parameter in app.SamResources.Parameters.RefParams -%}
+        {{ parameter.Key }}: !Ref {{ parameter.Value }}
+        {% endfor -%}{%- endif %}
+        {% if app.SamResources.Parameters.SubParams is defined -%}
+        {% for parameter in app.SamResources.Parameters.SubParams -%}
+        {{ parameter.Key }}: !Sub {{ parameter.Value }}
+        {% endfor -%}{%- endif %}
+        {% if app.SamResources.Parameters.GetAttParams is defined -%}
+        {% for parameter in app.SamResources.Parameters.GetAttParams -%}
+        {{ parameter.Key }}: !GetAtt {{ parameter.Value }}
+        {% endfor -%}{%- endif %}
+      {% endif -%}
+  {% endif %}
+  {% endfor %}
+
+  ###############
+  # API Gateway #
+  ###############
+  ApiDomainCertificate:
+    Type: AWS::CertificateManager::Certificate
+    Condition: CreateRegionalApiDomainCertificate
+    Properties:
+      CertificateTransparencyLoggingPreference: ENABLED
+      DomainName: !Ref DomainName
+      SubjectAlternativeNames:
+        - !Sub 'api.${DomainName}'
+      ValidationMethod: DNS
+      DomainValidationOptions: !If
+      - Route53HostedZone
+      - - DomainName: !Ref DomainName
+          HostedZoneId: !Ref HostedZoneId
+      - !Ref AWS::NoValue
+
+  ApiCustomDomain:
+    Type: AWS::ApiGateway::DomainName
+    {# DeletionPolicy: Retain #}
+    Condition: CreateApiGatewayDomain
+    Properties:
+      DomainName: !Sub api.${DomainName}
+      EndpointConfiguration:
+        Types:
+        - !If
+          - CreateRegionalApiDomainCertificate
+          - REGIONAL
+          - EDGE
+      RegionalCertificateArn: !If
+      - CreateRegionalApiDomainCertificate
+      - !Ref ApiDomainCertificate
+      - !Ref AWS::NoValue
+      CertificateArn: !If
+      - CreateRegionalApiDomainCertificate
+      - !Ref AWS::NoValue
+      - !Ref ImportedApiDomainCertificate
+      SecurityPolicy: !Ref ApiGatewayDomainSecurityPolicy
+
+  {% for stage in sceptre_user_data.DashboardApi.Stages %}
+  Api{{ stage.Stage }}Gateway:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      ApiKeySourceType: HEADER
+      Description: Calendar Snack {{ stage.Stage }} API Gateway
+      EndpointConfiguration:
+        Types:
+          - EDGE
+      Name: !Sub calendarsnack-${Environment}-{{ stage.Stage|lower }}
+  {% endfor %}
+
+  #############
+  # Dashboard #
+  #############
+  {% for app in sceptre_user_data.DashboardApps %}
+  {{ app.AppName|title|replace("-", "") }}SamApp:
+    Type: AWS::Serverless::Application
+    Properties:
+      Location:
+        ApplicationId: {{ sceptre_user_data.DashboardAppIdPrefix }}{{ app.AppName }}
+        {% if app.SemanticVersion is defined -%}
+        SemanticVersion: {{ app.SemanticVersion }}
+        {% else -%}
+        SemanticVersion: !Ref DashboardDefaultSemanticVersion
+        {%- endif -%}
+      {% if app.Parameters is defined %}
+      Parameters:
+        LogLevel: !Ref DefaultLambdaLogLevel
+        {% if app.Parameters.StaticParams is defined -%}
+        {% for parameter in app.Parameters.StaticParams -%}
+        {{ parameter.Key }}: "{{ parameter.Value }}"
+        {% endfor -%}{%- endif %}
+        {% if app.Parameters.RefParams is defined -%}
+        {% for parameter in app.Parameters.RefParams -%}
+          {{ parameter.Key }}: !Ref {{ parameter.Value }}
+        {% endfor -%}{%- endif %}
+        {% if app.Parameters.SubParams is defined -%}
+        {% for parameter in app.Parameters.SubParams -%}
+          {{ parameter.Key }}: !Sub {{ parameter.Value }}
+        {% endfor -%}{%- endif %}
+        {% if app.Parameters.GetAttParams is defined -%}
+        {% for parameter in app.Parameters.GetAttParams -%}
+          {{ parameter.Key }}: !GetAtt {{ parameter.Value }}
+        {% endfor -%}{%- endif %}
+  {%- endif -%}{%- endfor -%}
+
+  {% for stage in sceptre_user_data.DashboardApi.Stages -%}
+    {%- for app in stage.Apps %}
+  Api{{ app.Name|title|replace("-", "") }}Resource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref Api{{ stage.Stage }}Gateway
+        {%- if app.Parent is defined %}
+      ParentId: !Ref Api{{ app.Parent|title|replace("-", "") }}Resource
+        {%-  else %}
+      ParentId: !GetAtt Api{{ stage.Stage }}Gateway.RootResourceId
+        {%- endif %}
+      PathPart: {{ app.PathPart }}
+
+  {% if app.FunctionName is defined %}
+  {% if not app.FunctionUri is defined %}
+  {{ app.FunctionName|title|replace("-", "") }}ApiInvokePermission:
+    Type: AWS::Lambda::Permission
+    DependsOn: {{ app.FunctionName|title|replace("-", "") }}SamApp
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt {{ app.FunctionName|title|replace("-", "") }}SamApp.Outputs.{{ app.FunctionName|title|replace("-", "") }}Function
+      Principal: apigateway.amazonaws.com
+      {%- if app.PermissionPath is defined %}
+      SourceArn:  !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${Api{{ stage.Stage }}Gateway}/{{ app.PermissionPath }}
+      {%  else %}
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${Api{{ stage.Stage }}Gateway}/*/*/*
+      {% endif %}
+  {% endif %}
+
+  Api{{ app.Name|title|replace("-", "") }}Method:
+    {% if not app.FunctionUri is defined -%}
+    DependsOn: {{ app.FunctionName|replace("_", "-")|title|replace("-", "") }}SamApp
+    {% endif -%}
+    Type: AWS::ApiGateway::Method
+    Properties:
+      OperationName: !Sub 'calendarsnack-${Environment}-{{ stage.Stage|lower }}_{{ app.Name|replace("-", "_") }}'
+      ResourceId: !Ref Api{{ app.Name|title|replace("-", "") }}Resource
+      RestApiId: !Ref Api{{ stage.Stage }}Gateway
+      ApiKeyRequired: {{ app.ApiKeyRequired }}
+      AuthorizationType: {{ app.AuthorizationType }}
+      HttpMethod: {{ app.HttpMethod }}
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json: Empty
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: "false"
+      Integration:
+        IntegrationHttpMethod: {{ app.IntegrationHttpMethod }}
+        Type: {{ app.IntegrationType }}
+        PassthroughBehavior: {{ app.PassThroughBehavior }}
+        {% if app.FunctionUri is defined -%}
+        Uri: !Sub {{ app.FunctionUri }}
+        Credentials: !GetAtt {{ app.RoleName }}.Arn
+        RequestParameters: {}
+        RequestTemplates:
+          {% if sceptre_user_data[app.Name|title|replace("-", "")]['Request'] is defined -%}
+          application/json: !Sub |
+            {{ sceptre_user_data[app.Name|title|replace("-", "")]['Request']|indent(14) }}
+          {% else -%}
+            application/json: !Ref AWS::NoValue
+          {% endif %}
+        IntegrationResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: "'*'"
+          ResponseTemplates:
+            {% if sceptre_user_data[app.Name|title|replace("-", "")]['Response'] is defined -%}
+            application/json: |
+              {{ sceptre_user_data[app.Name|title|replace("-", "")]['Response']|indent(14) }}
+              {% else -%}
+            application/json: !Ref AWS::NoValue
+              {% endif -%}
+        {% else -%}
+        Uri: !Join
+        - ''
+        - - !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/'
+          - !GetAtt {{ app.FunctionName|title|replace("-", "") }}SamApp.Outputs.{{ app.FunctionName|title|replace("-", "") }}Function
+          - /invocations
+        {% endif %}
+
+  {% if app.Mock is defined %}
+  Api{{ app.Name|title|replace("-", "") }}MockMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      ResourceId: !Ref Api{{ app.Name|title|replace("-", "") }}Resource
+      RestApiId: !Ref Api{{ stage.Stage }}Gateway
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      RequestParameters: {}
+      Integration:
+        Type: MOCK
+        IntegrationResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: '''Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'''
+            method.response.header.Access-Control-Allow-Methods: '''GET,OPTIONS'''
+            method.response.header.Access-Control-Allow-Origin: '''*'''
+          ResponseTemplates:
+            application/json: ''
+        PassthroughBehavior: WHEN_NO_MATCH
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json: Empty
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: false
+            method.response.header.Access-Control-Allow-Methods: false
+            method.response.header.Access-Control-Allow-Origin: true
+    {% endif %}{% endif %}{% endfor %}
+
+  Api{{ stage.Stage }}Deployment:
+    DependsOn:
+    {% for app in stage.Apps -%}
+    {% if app.FunctionName is defined %}
+    - Api{{ app.Name|title|replace("-", "") }}Method
+    {% endif %}{% endfor %}
+    Type: AWS::ApiGateway::Deployment
+    Properties:
+      Description: API Gateway {{ stage.Stage }} API Deployment
+      RestApiId: !Ref Api{{ stage.Stage }}Gateway
+
+  Api{{ stage.Stage }}Stage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      DeploymentId: !Ref Api{{ stage.Stage }}Deployment
+      Description: API Gateway {{ stage.Stage }} API Stage
+      RestApiId: !Ref Api{{ stage.Stage }}Gateway
+      StageName: !Ref Environment
+
+  Api{{ stage.Stage }}Mapping:
+    Type: AWS::ApiGateway::BasePathMapping
+    Properties:
+      BasePath: {{ stage.Stage|lower }}
+      DomainName: !If
+      - CreateApiGatewayDomain
+      - !Ref ApiCustomDomain
+      - !Sub api.${DomainName}
+      RestApiId: !Ref Api{{ stage.Stage }}Gateway
+      Stage: !Ref Api{{ stage.Stage }}Stage
+  {% endfor %}
+
+  ApiKey:
+    Type: AWS::ApiGateway::ApiKey
+    Condition: CreateApiKey
+    Properties:
+      Name: !Ref DomainName
+      Description: !Sub API key for api.${DomainName}
+      Enabled: !Ref ApiKeyEnabled
+      {% if sceptre_user_data.ApiKeySecretRef is defined %}
+      Value: !Join
+      - ''
+      - - '{{'{{'}}'
+        - 'resolve:secretsmanager:'
+        - {{ sceptre_user_data.ApiKeySecretRef }}
+        - ':SecretString'
+        - '{{'}}'}}'
+      {% endif %}
+      StageKeys:
+      {% for stage in sceptre_user_data.DashboardApi.Stages %}
+        - RestApiId: !Ref Api{{ stage.Stage }}Gateway
+          StageName: !Ref Api{{ stage.Stage }}Stage
+      {% endfor %}
+
+  ApiUsagePlan:
+    Type: AWS::ApiGateway::UsagePlan
+    Properties:
+      UsagePlanName: !Sub api.${DomainName}
+      Description: Calendar Snack API Usage Plan
+      ApiStages:
+        {% for stage in sceptre_user_data.DashboardApi.Stages %}
+          - ApiId: !Ref Api{{ stage.Stage }}Gateway
+            Stage: !Ref Api{{ stage.Stage }}Stage
+        {% endfor %}
+      Throttle:
+        BurstLimit: !Ref BurstLimit
+        RateLimit: !Ref RateLimit
+
+  ApiUsagePlanKey:
+    Type: AWS::ApiGateway::UsagePlanKey
+    Properties:
+      KeyId: !If
+      - CreateApiKey
+      - !Ref ApiKey
+      - !Ref ImportedApiKeyId
+      KeyType: API_KEY
+      UsagePlanId: !Ref ApiUsagePlan

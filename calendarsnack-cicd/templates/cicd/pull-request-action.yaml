@@ -1,0 +1,105 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: An action that triggers when a pull request is created or updated.
+
+Parameters:
+  BuildSpecFile:
+    Type: String
+    Description: The path to the build spec file to trigger this action.
+
+  GitHubAccount:
+    Type: String
+    Description: GitHub account containing the repo to mirror.
+
+  GitHubRepo:
+    Type: String
+    Description: GitHub repo to mirror.
+
+  GitHubCodeStarConnectionArn:
+    Type: String
+    Description: AWS CodeStar Connection to use to connect to GitHub.
+
+  ############
+  # Optional #
+  ############
+
+  ComputeType:
+    Type: String
+    Description: Compute type instance to run CodeBuild on.
+    Default: BUILD_GENERAL1_SMALL
+    AllowedValues:
+      - BUILD_GENERAL1_SMALL
+      - BUILD_GENERAL1_MEDIUM
+      - BUILD_GENERAL1_LARGE
+
+Resources:
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/codebuild/${CodeBuildProject}
+      RetentionInDays: 7
+
+  CodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Ref AWS::StackName
+      Description: !Sub >
+        Trigger's ${BuildSpecFile} when a pull request is created or updated.
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+      Artifacts:
+        Type: NO_ARTIFACTS
+      Environment:
+        ComputeType: !Ref ComputeType
+        Type: LINUX_CONTAINER
+        Image: aws/codebuild/standard:4.0
+      Source:
+        Type: GITHUB
+        Location: !Sub "https://github.com/${GitHubAccount}/${GitHubRepo}.git"
+        BuildSpec: !Ref BuildSpecFile
+      Triggers:
+        Webhook: true
+        FilterGroups:
+          - - Type: EVENT
+              Pattern: PULL_REQUEST_CREATED, PULL_REQUEST_UPDATED
+
+  CodeBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          Effect: Allow
+          Principal:
+            Service: codebuild.amazonaws.com
+          Action: sts:AssumeRole
+      Policies:
+        - PolicyName: github-pr-action-policy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                Resource: "*"
+              - Sid: Logging
+                Effect: Allow
+                Action:
+                  - logs:PutLogEvents
+                Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*:*
+              - Effect: Allow
+                Action:
+                  # ListPolicies is required for SAM CLI's validate command.
+                  - iam:ListPolicies
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - "codestar-connections:UseConnection"
+                Resource: !Ref GitHubCodeStarConnectionArn
+              - Effect: Allow
+                Action:
+                  - "kms:Decrypt"
+                Resource: "*"
+              # - Effect: Allow
+              #   Action:
+              #     - "ssm:GetParameters"
+              #   Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/sceptre/aws/credentials"

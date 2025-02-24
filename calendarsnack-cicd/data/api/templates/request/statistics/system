@@ -1,0 +1,11 @@
+{
+"TableName": "thirtyone",
+"Key": {
+  "pk": {
+    "S": "system#"
+  },
+  "sk": {
+    "S": "system_statistics#"
+  }
+}
+}

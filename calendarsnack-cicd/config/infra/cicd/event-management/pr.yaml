@@ -1,0 +1,7 @@
+template:
+  path: cicd/pull-request-action.yaml
+parameters:
+  BuildSpecFile: .aws/buildspecs/sam-validate.yaml
+  GitHubAccount: {GitHubAccount}
+  GitHubRepo: calendarsnack-event-management
+  GitHubCodeStarConnectionArn: !stack_output infra/cicd/codestar-connection.yaml::CodeStarConnectionArn

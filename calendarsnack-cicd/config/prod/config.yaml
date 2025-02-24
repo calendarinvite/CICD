@@ -1,0 +1,5 @@
+env: blue-prod
+profile: calendarsnack-prod
+template_bucket_name: calendarsnack-prod-infra-cfn
+domain_name: calendarsnack.com
+protected: true

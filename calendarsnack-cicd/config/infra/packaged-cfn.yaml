@@ -1,0 +1,5 @@
+template:
+  path: infra/cfn-s3.yaml
+parameters:
+  BucketName: calendarsnack-dev-packaged-cfn
+  Versioning: "true"

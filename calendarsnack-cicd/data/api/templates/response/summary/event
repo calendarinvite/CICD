@@ -1,0 +1,17 @@
+#set($root = $input.path('$.Item'))
+{
+"uid":$input.json('$.Item.uid.S'),
+"created":$root['created']['N'],
+"description_html":$input.json('$.Item.description_html.S'),
+"dtend":$root['dtend']['N'],
+"dtstart":$root['dtstart']['N'],
+"last_modified":$root['last_modified']['N'],
+"location_html":$input.json('$.Item.location_html.S'),
+"mailto":$input.json('$.Item.mailto.S'),
+"original_organizer":$input.json('$.Item.original_organizer.S'),
+"organizer":$input.json('$.Item.organizer.S'),
+"prodid":$input.json('$.Item.prodid.S'),
+"sequence":$root['sequence']['N'],
+"status":$input.json('$.Item.status.S'),
+"summary_html":$input.json('$.Item.summary_html.S')
+}

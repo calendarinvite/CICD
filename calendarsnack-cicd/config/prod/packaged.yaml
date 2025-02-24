@@ -1,0 +1,74 @@
+template:
+  path: packaged-solution.j2
+parameters:
+  ApiGatewayDomainExists: "false"
+  ApiGatewayDomainSecurityPolicy: TLS_1_0
+  CodeCommitRepoName: thirtyone_public
+  DashboardDefaultSemanticVersion: 0.0.13
+  DomainName: blue.{{ domain_name }}
+  DefaultLambdaLogLevel: INFO
+  DynamoDbTableName: thirtyone
+  DynamoDbTableExists: "true"
+  Environment: {{ env }}
+  EventManagementDefaultSemanticVersion: 0.0.25
+  ImportedApiDomainCertificate: !ssm
+    name: /acm-certificate/blue.calendarsnack.com
+    region: us-east-1
+  ImportedApiKeyId: !ssm
+    name: /api-key/api.calendarsnack.com
+  ImportedSesEmailIdentity: "true"
+  ImportedSesS3Bucket: "false"
+  PackagedSolutionS3: {{ template_bucket_name }}
+  Project: blue-{{ project_code }}
+  SesS3BucketName: calendarsnack-prod-ses-blue
+  SesEmailIdentityName: calendarsnack.com
+  SesBulkEmailIdentityName: bulkinvite.com
+
+sceptre_user_data:
+  EventManagementApps: !file data/sam-apps/event-management.yaml
+  LambdaLayers: !file data/sam-apps/shared-library.yaml
+  SharedLibAppIdPrefix: !stack_output infra/cicd/shared-library/publish.yaml::AppIdPrefix
+  EventManagementAppIdPrefix: !stack_output infra/cicd/event-management/publish.yaml::AppIdPrefix
+  DashboardApi: !file data/api/dashboard.yaml
+  DashboardApps: !file data/sam-apps/dashboard.yaml
+  DashboardAppIdPrefix: !stack_output infra/cicd/dashboard/publish.yaml::AppIdPrefix
+  SesRules:
+    - Name: create
+      S3Prefix: event_request
+    - Name: bulk
+      S3Prefix: bulk_event_invites_email
+    - Name: notification
+    - Name: reply
+      S3Prefix: event_reply
+      CustomRecipient: rsvp@{{ domain_name }}
+    - Name: abuse
+    - Name: info
+    - Name: spam
+    - Name: support
+    - Name: sales
+    - Name: unsubscribe
+    - Name: bulk_notification
+      CustomRecipient: notification@bulkinvite.com
+  GetEventSummary:
+    Request: !file data/api/templates/request/summary/event
+    Response: !file data/api/templates/response/summary/event
+  GetEventStatistics:
+    Request: !file data/api/templates/request/statistics/event
+    Response: !file data/api/templates/response/statistics
+  SystemStatistics:
+    Request: !file data/api/templates/request/statistics/system
+  ShadowGetOrganizerStatistics:
+    Request: !file data/api/templates/request/statistics/organizer
+    Response: !file data/api/templates/response/statistics
+
+
+hooks:
+  before_update:
+  - !cmd
+        run: aws s3 sync templates/nested s3://{{ template_bucket_name }}
+        shell: bash
+  before_launch:
+  - !cmd
+      run:
+        aws s3 sync templates/nested s3://{{ template_bucket_name }}
+      shell: bash

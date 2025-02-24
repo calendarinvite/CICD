@@ -1,0 +1,66 @@
+- AppName: get-event-attendee-report
+  Parameters:
+    RefParams:
+    - Key: DynamoDbTableName
+      Value: DynamoDbTableName
+    - Key: CodeCommitRepoName
+      Value: CodeCommitRepoName
+    StaticParams:
+    - Key: AttendeeReportEmailTemplateFileName
+      Value: attendee_report.html
+    - Key: LocalCsvFileLocation
+      Value: /tmp/{}.csv
+    - Key: EmailSubject
+      Value: Calendar Snack Event Report
+    GetAttParams:
+    - Key: LayerVersionArn
+      Value: SharedLibLambdaLayer.Outputs.LayerVersionArn
+    SubParams:
+    - Key: EmailSender
+      Value: Calendar Snack <notification@${SesEmailIdentityName}>
+- AppName: get-event-attendee-sanitized-list
+  Parameters:
+    RefParams:
+    - Key: RestApiId
+      Value: ApiEventGateway
+    - Key: DynamoDbTableName
+      Value: DynamoDbTableName
+- AppName: get-new-event-invite-from-api
+  Parameters:
+    GetAttParams:
+    - Key: NewEventInviteRequestSnsTopicName
+      Value: VerifyNewEventInviteRequestSnsSqs.Outputs.TopicName
+    - Key: LayerVersionArn
+      Value: SharedLibLambdaLayer.Outputs.LayerVersionArn
+- AppName: get-organizer-events
+  Parameters:
+    RefParams:
+    - Key: DynamoDbTableName
+      Value: DynamoDbTableName
+    StaticParams:
+    - Key: EventViewLength
+      Value: 2500
+- AppName: get-system-events
+  Parameters:
+    RefParams:
+    - Key: DynamoDbTableName
+      Value: DynamoDbTableName
+    StaticParams:
+    - Key: EventViewLength
+      Value: 500
+- AppName: process-shopify-order
+  Parameters:
+      RefParams:
+      - Key: DynamoDbTableName
+        Value: DynamoDbTableName
+      GetAttParams:
+      - Key: SuccessfulEnrollmentSnsTopicArn
+        Value: NotifyOrganizerOfSuccessfulEnrollmentSnsSqs.Outputs.TopicName
+- AppName: get-organizer-events-legacy
+  Parameters:
+    RefParams:
+    - Key: DynamoDbTableName
+      Value: DynamoDbTableName
+    StaticParams:
+    - Key: EventViewLength
+      Value: 2500

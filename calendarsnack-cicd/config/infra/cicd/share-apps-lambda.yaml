@@ -1,0 +1,7 @@
+template:
+  path: cicd/share-apps-with-ou.j2
+parameters:
+  OrgUnits: {{ stack_group_config.org_units }}
+  FilterLabel: {{ stack_group_config.project_code }}
+sceptre_user_data:
+  Code: !file data/cicd-code/put-application-policies.py

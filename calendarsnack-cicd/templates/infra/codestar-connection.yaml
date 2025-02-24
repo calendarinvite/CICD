@@ -1,0 +1,26 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: Creates a CodeStar Connection.
+
+Parameters:
+  ProviderType:
+    Description: Type of account containing the repo to mirror.
+    Type: String
+    AllowedValues:
+      - Bitbucket
+      - GitHub
+      - GitHubEnterpriseServer
+
+Resources:
+  CodeStarConnection:
+    Type: AWS::CodeStarConnections::Connection
+    Properties:
+      ConnectionName: !Sub '${ProviderType}-connection'
+      ProviderType: !Ref ProviderType
+
+Outputs:
+  CodeStarConnectionArn:
+    Description: The ARN of the CodeStar Connection.
+    Value: !GetAtt CodeStarConnection.ConnectionArn
+    Export:
+      Name: !Sub '${AWS::StackName}'

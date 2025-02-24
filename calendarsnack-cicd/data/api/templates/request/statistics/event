@@ -1,0 +1,11 @@
+{
+"TableName": "thirtyone",
+    "Key": {
+        "pk": {
+            "S": "event#$input.params('uid')"
+        },
+        "sk": {
+            "S": "event_statistics#$input.params('uid')"
+        }
+    }
+}

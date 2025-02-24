@@ -1,0 +1,105 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+
+Description: Deploys everything needed for an sns-to-sqs pipeline.
+
+
+Parameters:
+  TopicName:
+    Type: String
+    Description: Name of SNS Topic.
+
+  DisplayName:
+    Type: String
+    Description: Display name of SNS Topic.
+
+  QueueName:
+    Type: String
+    Description: Name of SQS Queue.
+
+  MaxReceiveCount:
+    Type: String
+    Description: >
+      The number of times a message should be attempted to process
+      before being sent to the dead queue.
+
+  ReceiveMessageWaitTimeSeconds:
+    Type: String
+    Description: >
+      Specifies the duration, in seconds, that the ReceiveMessage action
+      call waits until a message is in the queue in order to include it in the
+      response, rather than returning an empty response if a message isn't yet
+      available. You can specify an integer from 1 to 20. Short polling is
+      used as the default or when you specify 0 for this property.
+    Default: "1"
+
+  VisibilityTimeout:
+    Type: String
+    Description: >
+      The length of time during which a message will be unavailable after a
+      message is delivered from the queue. This blocks other components from
+      receiving the same message and gives the initial component time to
+      process and delete the message from the queue.
+
+
+Resources:
+  Topic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Ref TopicName
+      DisplayName: !Ref DisplayName
+
+  DeadQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub ${QueueName}-dead
+      VisibilityTimeout: !Ref VisibilityTimeout
+
+  Queue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Ref QueueName
+      VisibilityTimeout: !Ref VisibilityTimeout
+      ReceiveMessageWaitTimeSeconds: !Ref ReceiveMessageWaitTimeSeconds
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt DeadQueue.Arn
+        maxReceiveCount: !Ref MaxReceiveCount
+
+
+  SqsPolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      PolicyDocument:
+          Version: "2012-10-17"
+          Id: inline
+          Statement:
+          - Sid: SnsSubscription
+            Effect: Allow
+            Principal: "*"
+            Action: sqs:SendMessage
+            Resource:
+              - !GetAtt Queue.Arn
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !Ref Topic
+      Queues:
+          - !Ref Queue
+
+  Subscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      Protocol: sqs
+      Endpoint: !GetAtt Queue.Arn
+      Region: !Ref AWS::Region
+      TopicArn: !Ref Topic
+
+
+Outputs:
+  TopicArn:
+    Value: !Ref Topic
+
+  TopicName:
+    Value: !GetAtt Topic.TopicName
+
+  QueueName:
+    Value: !GetAtt Queue.QueueName

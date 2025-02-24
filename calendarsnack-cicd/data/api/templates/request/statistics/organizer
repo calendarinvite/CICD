@@ -1,0 +1,11 @@
+{
+    "TableName": "thirtyone",
+    "Key": {
+        "pk": {
+            "S": "organizer#$input.params('organizer')"
+        },
+        "sk": {
+            "S": "organizer_statistics#$input.params('organizer')"
+        }
+    }
+}

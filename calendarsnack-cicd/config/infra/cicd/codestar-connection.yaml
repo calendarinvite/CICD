@@ -1,0 +1,4 @@
+template:
+  path: infra/codestar-connection.yaml
+parameters:
+  ProviderType: GitHub

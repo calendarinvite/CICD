@@ -1,0 +1,135 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: >
+  Publish SAM Application using Git tag as the version.
+
+  This CodeBuild Project builds a SAM Application from a GitHub repository
+  and publishes it to the Serverless Application Repository (SAR). This
+  CodeBuild triggers off of a Git tag and utilises the tag name as the version
+  to publish ignore the version value configured in the SAM template.
+
+Parameters:
+
+  ############
+  # Required #
+  ############
+
+  GitHubAccount:
+    Type: String
+    Description: GitHub account containing the repo to publish.
+
+  GitHubRepo:
+    Type: String
+    Description: GitHub repo to publish SAM Application from.
+
+  GitHubCodeStarConnectionArn:
+    Type: String
+    Description: AWS CodeStar Connection to use to connect to GitHub.
+
+  S3BucketArn:
+    Type: String
+    Description: ARN of S3 Bucket used to publish SAM Application.
+
+
+Resources:
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/codebuild/${CodeBuildProject}
+      RetentionInDays: 7
+
+  CodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Ref AWS::StackName
+      Description: !Sub >
+        Publish SAM Application for
+        https://github.com/${GitHubAccount}/${GitHubRepo}
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+      Artifacts:
+        Type: NO_ARTIFACTS
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Type: LINUX_CONTAINER
+        Image: aws/codebuild/standard:5.0
+        EnvironmentVariables:
+          - Name: SAM_APPS_BUCKET
+            Type: PLAINTEXT
+            Value: !Select [ 5, !Split [ ":" , !Ref S3BucketArn ] ]
+      Source:
+        Type: GITHUB
+        Location: !Sub "https://github.com/${GitHubAccount}/${GitHubRepo}.git"
+        BuildSpec: !Sub |
+          version: 0.2
+
+          env:
+            git-credential-helper: yes
+
+          phases:
+            install:
+              commands:
+                - apt update -y
+                - apt install -y python3-pip
+
+            build:
+              commands:
+                {% for app in sceptre_user_data.SamApps %}
+                - |  # Override the SemanticVersion in the template with the Git tag version
+                  version=$(echo ${!CODEBUILD_WEBHOOK_TRIGGER} | rev | cut -d'/' -f1 | rev)
+                  sed -i "s/SemanticVersion:.*/SemanticVersion: '${!version}'/" templates/{{ app.AppName }}.yaml
+                - sam build -t templates/{{ app.AppName }}.yaml
+                - sam package --s3-bucket ${!SAM_APPS_BUCKET} --output-template-file packaged.yaml
+                - sam publish --template packaged.yaml
+                {% endfor %}
+      Triggers:
+        Webhook: true
+        FilterGroups:
+          - - Type: EVENT
+              Pattern: PUSH
+            - Type: HEAD_REF
+              Pattern: '^refs/tags/.*'
+
+  CodeBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          Effect: Allow
+          Principal:
+            Service: codebuild.amazonaws.com
+          Action: sts:AssumeRole
+      Policies:
+        - PolicyName: !Sub 'publish-sam-app-${GitHubAccount}-${GitHubRepo}'
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                Resource: "*"
+              - Sid: Logging
+                Effect: Allow
+                Action:
+                  - logs:PutLogEvents
+                Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*:*
+              - Effect: Allow
+                Action:
+                  - "codestar-connections:UseConnection"
+                Resource: !Ref GitHubCodeStarConnectionArn
+              - Effect: Allow
+                Action:
+                  - "s3:PutObject"
+                Resource: !Sub "${S3BucketArn}/*"
+              - Effect: Allow
+                Action:
+                  - "serverlessrepo:CreateApplication"
+                  - "serverlessrepo:CreateApplicationVersion"
+                  - "serverlessrepo:UpdateApplication"
+                Resource: !Sub "arn:aws:serverlessrepo:${AWS::Region}:${AWS::AccountId}:applications/*"
+
+
+Outputs:
+  AppIdPrefix:
+    Value: !Sub arn:aws:serverlessrepo:${AWS::Region}:${AWS::AccountId}:applications/

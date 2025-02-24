@@ -1,0 +1,461 @@
+- AppName: get-new-event-request-from-email
+  Sns:
+    TopicName: new-event-request-from-email
+    DisplayName: New event information received
+    FilterPrefix: event_request
+  Sqs:
+    QueueName: get-new-event-request-from-email
+    MaxReceiveCount: "1"
+    Visibility: "45"
+  SamResources:
+    Parameters:
+      StaticParams:
+      - Key: S3Prefix
+        Value: event_request
+      RefParams:
+      - Key: S3BucketName
+        Value: SesS3BucketName
+      GetAttParams:
+      - Key: LayerVersionArn
+        Value: SharedLibLambdaLayer.Outputs.LayerVersionArn
+      - Key: GetNewEventRequestFromEmailQueueName
+        Value: GetNewEventRequestFromEmailSnsSqs.Outputs.QueueName
+      - Key: EventCancelledTopicName
+        Value: CancelEventSnsSqs.Outputs.TopicName
+      - Key: EventUpdatedTopicName
+        Value: UpdateEventSnsSqs.Outputs.TopicName
+      - Key: FailedEventCreateTopicName
+        Value: NotifyOrganizerOfFailedEventCreateSnsSqs.Outputs.TopicName
+      # - Key: InvalidWinmailRequestTopicName
+      #   Value: InvalidWinmailRequestSnsSqs.Outputs.TopicName
+      - Key: NewEventRequestTopicName
+        Value: CreateNewEventRecordSnsSqs.Outputs.TopicName
+
+- AppName: cancel-event
+  Sns:
+    TopicName: event-cancelled
+    DisplayName: Event has been cancelled
+  Sqs:
+    QueueName: cancel-event
+    MaxReceiveCount: "2"
+    Visibility: "75"
+  SamResources:
+    Parameters:
+      RefParams:
+      - Key: DynamoDbTableName
+        Value: DynamoDbTableName
+      GetAttParams:
+      - Key: EventCancelSqsQueueName
+        Value: CancelEventSnsSqs.Outputs.QueueName
+      - Key: EventCancelCompleteSnsTopicName
+        Value: StageAttendeesForCancelledEventSnsSqs.Outputs.TopicName
+      - Key: LayerVersionArn
+        Value: SharedLibLambdaLayer.Outputs.LayerVersionArn
+
+- AppName: stage-attendees-for-cancelled-event
+  Sns:
+    TopicName: event-cancel-complete
+    DisplayName: Event cancel has been updated
+  Sqs:
+    QueueName: stage-attendees-for-cancelled-event
+    MaxReceiveCount: "2"
+    Visibility: "315"
+  SamResources:
+    Parameters:
+      RefParams:
+      - Key: DynamoDbTableName
+        Value: DynamoDbTableName
+      GetAttParams:
+      - Key: StageAttendeesForCancelledEventSqsQueueName
+        Value: StageAttendeesForCancelledEventSnsSqs.Outputs.QueueName
+      - Key: StageAttendeesForCancelledEventSnsTopicName
+        Value: SendEventCancellationSnsSqs.Outputs.TopicName
+      - Key: LayerVersionArn
+        Value: SharedLibLambdaLayer.Outputs.LayerVersionArn
+
+- AppName: send-event-cancellation
+  Sns:
+    TopicName: new-event-cancel-request
+    DisplayName: Notify attendees of cancellation
+  Sqs:
+    QueueName: send-event-cancellation
+    MaxReceiveCount: "2"
+    Visibility: "315"
+    WaitTimeSeconds: "5"
+  SamResources:
+    Parameters:
+      SubParams:
+      - Key: RsvpEmail
+        Value: rsvp@${SesEmailIdentityName}
+      - Key: SystemEmail
+        Value: '''{} <notification@${SesEmailIdentityName}>'''
+      RefParams:
+      - Key: DynamoDbTableName
+        Value: DynamoDbTableName
+      GetAttParams:
+      - Key: SendEventCancellationSqsQueueName
+        Value: SendEventCancellationSnsSqs.Outputs.QueueName
+      - Key: LayerVersionArn
+        Value: SharedLibLambdaLayer.Outputs.LayerVersionArn
+
+- AppName: update-event
+  Sns:
+    TopicName: event-updated
+    DisplayName: Event details have changed
+  Sqs:
+    QueueName: update-event
+    MaxReceiveCount: "2"
+    Visibility: "75"
+  SamResources:
+    Parameters:
+      RefParams:
+      - Key: DynamoDbTableName
+        Value: DynamoDbTableName
+      GetAttParams:
+      - Key: EventUpdateSnsTopicName
+        Value: StageAttendeesForUpdatedEventSnsSqs.Outputs.TopicName
+      - Key: UpdateEventSqsQueueName
+        Value: UpdateEventSnsSqs.Outputs.QueueName
+      - Key: LayerVersionArn
+        Value: SharedLibLambdaLayer.Outputs.LayerVersionArn
+
+- AppName: stage-attendees-for-updated-event
+  Sns:
+    TopicName: event-update-complete
+    DisplayName: Event detail update has completed
+  Sqs:
+    QueueName: stage-attendees-for-updated-event
+    MaxReceiveCount: "2"
+    Visibility: "315"
+  SamResources:
+    Parameters:
+      RefParams:
+      - Key: DynamoDbTableName
+        Value: DynamoDbTableName
+      GetAttParams:
+      - Key: StageAttendeesForUpdatedEventSnsTopicName
+        Value: SendEventUpdateSnsSqs.Outputs.TopicName
+      - Key: StageAttendeesForUpdatedEventSqsQueueName
+        Value: StageAttendeesForUpdatedEventSnsSqs.Outputs.QueueName
+      - Key: LayerVersionArn
+        Value: SharedLibLambdaLayer.Outputs.LayerVersionArn
+
+- AppName: send-event-update
+  Sns:
+    TopicName: new-event-update-request
+    DisplayName: Send updated event details to attendees
+  Sqs:
+    QueueName: send-event-update
+    MaxReceiveCount: "2"
+    Visibility: "315"
+    WaitTimeSeconds: "5"
+  SamResources:
+    Parameters:
+      RefParams:
+      - Key: DynamoDbTableName
+        Value: DynamoDbTableName
+      GetAttParams:
+      - Key: SendEventUpdateSqsQueueName
+        Value: SendEventUpdateSnsSqs.Outputs.QueueName
+      - Key: LayerVersionArn
+        Value: SharedLibLambdaLayer.Outputs.LayerVersionArn
+      SubParams:
+      - Key: RsvpEmail
+        Value: rsvp@${SesEmailIdentityName}
+      - Key: SystemEmail
+        Value: '''{} <notification@${SesEmailIdentityName}>'''
+
+- AppName: create-new-event-record
+  Sns:
+    TopicName: new-event-request
+    DisplayName: Create new event record
+  Sqs:
+    QueueName: create-new-event-record
+    MaxReceiveCount: "2"
+    Visibility: "120"
+  SamResources:
+    Parameters:
+      StaticParams:
+      - Key: EventInviteLimit
+        Value: "2500"
+      - Key: EventLimit
+        Value: "5"
+      - Key: OriginalUidDynamoDbIndex
+        Value: original_events
+      RefParams:
+      - Key: DynamoDbTableName
+        Value: DynamoDbTableName
+      GetAttParams:
+      - Key: CreateNewEventRecordSqsQueueName
+        Value: CreateNewEventRecordSnsSqs.Outputs.QueueName
+      - Key: EventLimitReachedSnsTopicName
+        Value: NotifyOrganizerOfEventLimitReachedSnsSqs.Outputs.TopicName
+      - Key: EventUpdatedSnsTopicName
+        Value: UpdateEventSnsSqs.Outputs.TopicName
+      - Key: NewEventCreatedSnsTopicName
+        Value: NotifyOrganizerOfSuccessfulEventCreateSnsSqs.Outputs.TopicName
+      - Key: LayerVersionArn
+        Value: SharedLibLambdaLayer.Outputs.LayerVersionArn
+
+- AppName: notify-organizer-of-event-limit-reached
+  Sns:
+    TopicName: event-limit-reached
+    DisplayName: Notify organizer of event limit reached
+  Sqs:
+    QueueName: notify-organizer-of-event-limit-reached
+    MaxReceiveCount: "2"
+    Visibility: "45"
+  SamResources:
+    Parameters:
+      StaticParams:
+      - Key: EventLimitReachedNotificationEmailTemplateName
+        Value: event_limit_reached_notification.html
+      - Key: EmailSubject
+        Value: "Calendar Snack Notification"
+      RefParams:
+      - Key: CodeCommitRepoName
+        Value: CodeCommitRepoName
+      GetAttParams:
+      - Key: EventLimitReachedSqsQueueName
+        Value: NotifyOrganizerOfEventLimitReachedSnsSqs.Outputs.QueueName
+      - Key: LayerVersionArn
+        Value: SharedLibLambdaLayer.Outputs.LayerVersionArn
+      SubParams:
+      - Key: EmailSender
+        Value:  Calendar Snack <notification@${SesEmailIdentityName}>
+
+- AppName: notify-organizer-of-successful-event-create
+  Sns:
+    TopicName: new-event-created
+    DisplayName: Notify organizer that event has been successfully created
+  Sqs:
+    QueueName: notify-organizer-of-successful-event-create
+    MaxReceiveCount: "2"
+    Visibility: "45"
+  SamResources:
+    Parameters:
+      StaticParams:
+      - Key: SuccessfulEventCreateNotificationEmailTemplateName
+        Value: new_event_notification.html
+      - Key: SuccessfulEventCreatePaidNotificationEmailTemplateName #todo - remove
+        Value: new_paid_event_notification #todo - remove
+      - Key: EmailSubject
+        Value: "Calendar Snack Notification"
+      RefParams:
+      - Key: CodeCommitRepoName
+        Value: CodeCommitRepoName
+      GetAttParams:
+      - Key: SuccessfulEventCreateSqsQueueName
+        Value: NotifyOrganizerOfSuccessfulEventCreateSnsSqs.Outputs.QueueName
+      - Key: LayerVersionArn
+        Value: SharedLibLambdaLayer.Outputs.LayerVersionArn
+      SubParams:
+      - Key: EmailSender
+        Value:  Calendar Snack <notification@${SesEmailIdentityName}>
+
+- AppName: notify-organizer-of-failed-event-create
+  Sns:
+    TopicName: failed-event-create
+    DisplayName: Notify organizer of failed event creation
+  Sqs:
+    QueueName: notify-organizer-of-failed-event-create
+    MaxReceiveCount: "2"
+    Visibility: "315"
+  SamResources:
+    Parameters:
+      StaticParams:
+      - Key: FailedEventCreateNotificationEmailTemplateName
+        Value: failed_event_notification.html
+      - Key: EmailSubject
+        Value: "Calendar Snack Notification"
+      RefParams:
+      - Key: CodeCommitRepoName
+        Value: CodeCommitRepoName
+      GetAttParams:
+      - Key: FailedEventCreateSqsQueueName
+        Value: NotifyOrganizerOfFailedEventCreateSnsSqs.Outputs.QueueName
+      - Key: LayerVersionArn
+        Value: SharedLibLambdaLayer.Outputs.LayerVersionArn
+      SubParams:
+      - Key: EmailSender
+        Value:  Calendar Snack <notification@${SesEmailIdentityName}>
+
+- AppName: notify-organizer-of-successful-enrollment
+  Sns:
+    TopicName: successful-enrollment
+    DisplayName: Notify organizer of successful enrollment
+  Sqs:
+    QueueName: notify-organizer-of-successful-enrollment
+    MaxReceiveCount: "2"
+    Visibility: "45"
+  SamResources:
+    Parameters:
+      StaticParams:
+      - Key: SuccessfulEnrollmentNotificationEmailTemplateName #todo - remove
+        Value: successful_enrollment_notification.html #todo - remove
+      - Key: EmailSubject
+        Value: "Calendar Snack Subscription Confirmation"
+      RefParams:
+      - Key: CodeCommitRepoName
+        Value: CodeCommitRepoName
+      GetAttParams:
+      - Key: SuccessfulEnrollmentSqsQueueName
+        Value: NotifyOrganizerOfSuccessfulEnrollmentSnsSqs.Outputs.QueueName
+      - Key: LayerVersionArn
+        Value: SharedLibLambdaLayer.Outputs.LayerVersionArn
+      SubParams:
+      - Key: EmailSender
+        Value:  Calendar Snack <notification@${SesEmailIdentityName}>
+
+# - AppName: invalid-winmail-request
+#   Sns:
+#     TopicName: invalid-winmail-request
+#     DisplayName: Invalid winmail request
+#   Sqs:
+#     QueueName: invalid-winmail-request
+#     MaxReceiveCount: "1"
+#     Visibility: "45"
+
+- AppName: get-new-bulk-event-invites-from-email
+  Sns:
+    TopicName: new-bulk-event-invites-from-email
+    DisplayName: Get new bulk event invites from email
+    FilterPrefix: bulk_event_invites_email
+  Sqs:
+    QueueName: get-new-bulk-event-invites-from-email
+    MaxReceiveCount: "2"
+    Visibility: "915"
+  SamResources:
+    Parameters:
+      StaticParams:
+      - Key: S3Prefix
+        Value: bulk_event_invites_email
+      RefParams:
+      - Key: DynamoDbTableName
+        Value: DynamoDbTableName
+      - Key: S3BucketName
+        Value: SesS3BucketName
+      GetAttParams:
+      - Key: NewBulkEventInviteQueueName
+        Value: GetNewBulkEventInvitesFromEmailSnsSqs.Outputs.QueueName
+      - Key: NewEventInviteTopicName
+        Value: SendBulkEventInviteSnsSqs.Outputs.TopicName
+      SubParams:
+      - Key: SystemEmail
+        Value:  Calendar Snack <notification@${SesEmailIdentityName}>
+
+- AppName: send-bulk-event-invite
+  Sns:
+    TopicName: send-bulk-event-invite
+    DisplayName: Send bulk event invites to proposed attendees
+  Sqs:
+    QueueName: send-bulk-event-invite
+    MaxReceiveCount: "2"
+    Visibility: "315"
+    WaitTimeSeconds: "5"
+  SamResources:
+    Parameters:
+      RefParams:
+      - Key: DynamoDbTableName
+        Value: DynamoDbTableName
+      GetAttParams:
+      - Key: SendBulkEventInviteSqsQueueName
+        Value: SendBulkEventInviteSnsSqs.Outputs.QueueName
+      - Key: LayerVersionArn
+        Value: SharedLibLambdaLayer.Outputs.LayerVersionArn
+      SubParams:
+      - Key: SystemEmail
+        Value:  Calendar Snack <notification@${SesBulkEmailIdentityName}>
+      - Key: RsvpEmail
+        Value: rsvp@${SesEmailIdentityName}
+
+- AppName: get-new-event-reply-from-email
+  Sns:
+    TopicName: new-event-reply-from-email
+    DisplayName: Get new event reply from email
+    FilterPrefix: event_reply
+  Sqs:
+    QueueName: get-new-event-reply-from-email
+    MaxReceiveCount: "2"
+    Visibility: "315"
+  SamResources:
+    Parameters:
+      RefParams:
+      - Key: S3BucketName
+        Value: SesS3BucketName
+      StaticParams:
+      - Key: S3Prefix
+        Value: event_reply
+      GetAttParams:
+      - Key: GetNewEventReplyFromEmailQueueName
+        Value: GetNewEventReplyFromEmailSnsSqs.Outputs.QueueName
+      - Key: NewEventReplyTopicName
+        Value: UpdateEventAttendeeRecordSnsSqs.Outputs.TopicName
+      - Key: LayerVersionArn
+        Value: SharedLibLambdaLayer.Outputs.LayerVersionArn
+
+- AppName: update-event-attendee-record
+  Sns:
+    TopicName: new-event-reply
+    DisplayName: Update event attendee record
+  Sqs:
+    QueueName: update-event-attendee-record
+    MaxReceiveCount: "2"
+    Visibility: "315"
+    WaitTimeSeconds: "5"
+  SamResources:
+    Parameters:
+      RefParams:
+      - Key: DynamoDbTableName
+        Value: DynamoDbTableName
+      GetAttParams:
+      - Key: UpdateEventAttendeeRecordSqsQueueName
+        Value: UpdateEventAttendeeRecordSnsSqs.Outputs.QueueName
+      - Key: LayerVersionArn
+        Value: SharedLibLambdaLayer.Outputs.LayerVersionArn
+
+- AppName: verify-new-event-invite-request
+  Sns:
+    TopicName: new-event-invite-request
+    DisplayName: Verify new event invite request
+  Sqs:
+    QueueName: verify-new-event-invite-request
+    MaxReceiveCount: "2"
+    Visibility: "315"
+  SamResources:
+    Parameters:
+      RefParams:
+      - Key: DynamoDbTableName
+        Value: DynamoDbTableName
+      GetAttParams:
+      - Key: VerifyNewEventInviteRequestSqsQueueName
+        Value: VerifyNewEventInviteRequestSnsSqs.Outputs.QueueName
+      - Key: NewEventInviteRequestSnsTopicName
+        Value: SendEventInviteSnsSqs.Outputs.TopicName
+      - Key: LayerVersionArn
+        Value: SharedLibLambdaLayer.Outputs.LayerVersionArn
+
+- AppName: send-event-invite
+  Sns:
+    TopicName: new-event-invite
+    DisplayName: Send new event invite
+  Sqs:
+    QueueName: send-event-invite
+    MaxReceiveCount: "2"
+    Visibility: "315"
+    WaitTimeSeconds: "5"
+  SamResources:
+    Parameters:
+      RefParams:
+      - Key: DynamoDbTableName
+        Value: DynamoDbTableName
+      GetAttParams:
+      - Key: SendEventInviteSqsQueueName
+        Value: SendEventInviteSnsSqs.Outputs.QueueName
+      - Key: LayerVersionArn
+        Value: SharedLibLambdaLayer.Outputs.LayerVersionArn
+      SubParams:
+      - Key: SystemEmail
+        Value:  Calendar Snack <notification@${SesEmailIdentityName}>
+      - Key: RsvpEmail
+        Value: rsvp@${SesEmailIdentityName}

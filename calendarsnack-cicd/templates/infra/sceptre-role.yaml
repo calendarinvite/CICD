@@ -1,0 +1,82 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: Sceptre user access.
+
+Parameters:
+  CrossAccountBucket:
+    Type: String
+    Description: S3 Bucket to grant cross account access to.
+    Default: "arn:aws:s3:::*"
+
+
+Resources:
+  SceptreRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - codebuild.amazonaws.com
+              AWS: !Ref AWS::AccountId
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: SceptrePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cloudformation:CreateStack
+                  - cloudformation:DeleteStack
+                  - cloudformation:DescribeStackEvents
+                  - cloudformation:DescribeStackResource
+                  - cloudformation:DescribeStackResources
+                  - cloudformation:DescribeStacks
+                  - cloudformation:GetStackPolicy
+                  - cloudformation:GetTemplate
+                  - cloudformation:GetTemplateSummary
+                  - cloudformation:ListStackResources
+                  - cloudformation:ListStacks
+                  - cloudformation:SetStackPolicy
+                  - cloudformation:TagResource
+                  - cloudformation:UntagResource
+                  - cloudformation:UpdateStack
+                  - cloudformation:UpdateTerminationProtection
+                  - cloudformation:ValidateTemplate
+                  - cloudformation:CreateChangeSet
+                  - cloudformation:DeleteChangeSet
+                  - cloudformation:DescribeChangeSet
+                  - cloudformation:ExecuteChangeSet
+                  - cloudformation:ListChangeSets
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  # - s3:CreateBucket
+                  # - s3:PutObject
+                  - acm:*
+                  - apigateway:*
+                  - codebuild:*
+                  - codestar-connections:*
+                  - codepipeline:*
+                  - dynamodb:*
+                  - iam:*
+                  - kms:*
+                  - lambda:*
+                  - logs:*
+                  - s3:*
+                  - serverlessrepo:*
+                  - sns:*
+                  - sqs:*
+                Resource: "*"
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub arn:aws:s3:::*${CrossAccountBucket}
+
+Outputs:
+  SceptreRoleArn:
+    Description: Arn of Sceptre Role
+    Value: !GetAtt SceptreRole.Arn
